@@ -31,6 +31,30 @@ jobs:
             -o /usr/local/bin/lightsailctl
           sudo chmod +x /usr/local/bin/lightsailctl
 
+      # NEW: Ensure service exists and is READY
+      - name: Ensure Lightsail Container Service is ready
+        run: |
+          echo "Checking if service ${{ env.LIGHTSAIL_SERVICE }} exists..."
+          if ! aws lightsail get-container-services --service-name ${{ env.LIGHTSAIL_SERVICE }} --region ${{ env.AWS_REGION }} > /dev/null 2>&1; then
+            echo "Service does not exist. Creating..."
+            aws lightsail create-container-service \
+              --service-name ${{ env.LIGHTSAIL_SERVICE }} \
+              --power micro \
+              --scale 1 \
+              --region ${{ env.AWS_REGION }}
+          fi
+
+          echo "Waiting for service to be READY..."
+          while true; do
+            STATE=$(aws lightsail get-container-services --service-name ${{ env.LIGHTSAIL_SERVICE }} --region ${{ env.AWS_REGION }} --query 'containerServices[0].state' --output text)
+            echo "Current State: $STATE"
+            if [ "$STATE" == "READY" ]; then
+              echo "Service is ready!"
+              break
+            fi
+            sleep 10
+          done
+
       - name: Build image with Docker
         run: |
           docker build --platform linux/amd64 -t ${{ env.CONTAINER_NAME }}:latest .
