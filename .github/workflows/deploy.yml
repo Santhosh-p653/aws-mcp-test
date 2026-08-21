@@ -31,7 +31,7 @@ jobs:
             -o /usr/local/bin/lightsailctl
           sudo chmod +x /usr/local/bin/lightsailctl
 
-      # NEW: Ensure service exists and is READY
+      # Ensure service exists and is READY or RUNNING
       - name: Ensure Lightsail Container Service is ready
         run: |
           echo "Checking if service ${{ env.LIGHTSAIL_SERVICE }} exists..."
@@ -44,12 +44,12 @@ jobs:
               --region ${{ env.AWS_REGION }}
           fi
 
-          echo "Waiting for service to be READY..."
+          echo "Waiting for service to be READY or RUNNING..."
           while true; do
             STATE=$(aws lightsail get-container-services --service-name ${{ env.LIGHTSAIL_SERVICE }} --region ${{ env.AWS_REGION }} --query 'containerServices[0].state' --output text)
             echo "Current State: $STATE"
-            if [ "$STATE" == "READY" ]; then
-              echo "Service is ready!"
+            if [ "$STATE" = "READY" ] || [ "$STATE" = "RUNNING" ]; then
+              echo "Service is ready to accept deployments!"
               break
             fi
             sleep 10
