@@ -25,27 +25,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install Podman & Lightsailctl Plugin
+      - name: Install Lightsailctl Plugin
         run: |
-          sudo apt-get update && sudo apt-get install -y podman
           sudo curl "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
             -o /usr/local/bin/lightsailctl
           sudo chmod +x /usr/local/bin/lightsailctl
 
-      # 1. Enable Podman's Docker-compatible socket
-      - name: Start Podman API Socket
+      - name: Build image with Docker
         run: |
-          sudo systemctl start podman.socket
-          sudo chmod 666 /usr/local/run/podman/podman.sock || sudo chmod 666 /run/podman/podman.sock
-          # Point DOCKER_HOST to Podman's socket so lightsailctl uses Podman transparently
-          echo "DOCKER_HOST=unix:///run/podman/podman.sock" >> $GITHUB_ENV
+          docker build --platform linux/amd64 -t ${{ env.CONTAINER_NAME }}:latest .
 
-      # 2. Build with Podman
-      - name: Build image with Podman
-        run: |
-          podman build --platform linux/amd64 -t ${{ env.CONTAINER_NAME }}:latest .
-
-      # 3. Push image to Lightsail container registry (Directly reads from Podman socket now)
       - name: Push image to Lightsail container registry
         run: |
           aws lightsail push-container-image \
@@ -54,7 +43,6 @@ jobs:
             --label ${{ env.CONTAINER_NAME }} \
             --image ${{ env.CONTAINER_NAME }}:latest
 
-      # 4. Deploy to Lightsail container service
       - name: Deploy to Lightsail container service
         run: |
           IMAGE_TAG=$(aws lightsail get-container-images \
