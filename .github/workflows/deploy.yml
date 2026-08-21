@@ -25,58 +25,54 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install Podman & Lightsail CTL plugin
+      - name: Install Podman & Lightsailctl Plugin
         run: |
-          sudo apt-get install -y podman
-          curl "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
+          sudo apt-get update && sudo apt-get install -y podman
+          sudo curl "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
             -o /usr/local/bin/lightsailctl
-          chmod +x /usr/local/bin/lightsailctl
+          sudo chmod +x /usr/local/bin/lightsailctl
 
-      # ✅ Build with Podman (the demo part)
+      # Build with Podman
       - name: Build image with Podman
         run: |
-          podman build -t $CONTAINER_NAME:latest .
+          podman build --platform linux/amd64 -t ${{ env.CONTAINER_NAME }}:latest .
 
-      # ✅ Bridge: export from Podman → load into Docker for lightsailctl
+      # Bridge: export from Podman → load into Docker for lightsailctl
       - name: Export Podman image to Docker
         run: |
-          podman save --format docker-archive $CONTAINER_NAME:latest \
-            -o /tmp/$CONTAINER_NAME.tar
-          sudo docker load -i /tmp/$CONTAINER_NAME.tar
+          podman save --format docker-archive ${{ env.CONTAINER_NAME }}:latest -o /tmp/${{ env.CONTAINER_NAME }}.tar
+          docker load -i /tmp/${{ env.CONTAINER_NAME }}.tar
+          rm -f /tmp/${{ env.CONTAINER_NAME }}.tar
 
-      - name: Install Lightsail CTL plugin
-        run: |
-          curl "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
-            -o /usr/local/bin/lightsailctl
-          chmod +x /usr/local/bin/lightsailctl
-
-      # ✅ Push via lightsailctl (uses Docker under the hood)
+      # Push via lightsailctl
       - name: Push image to Lightsail container registry
         run: |
           aws lightsail push-container-image \
-            --region $AWS_REGION \
-            --service-name $LIGHTSAIL_SERVICE \
-            --label $CONTAINER_NAME \
-            --image $CONTAINER_NAME:latest
+            --region ${{ env.AWS_REGION }} \
+            --service-name ${{ env.LIGHTSAIL_SERVICE }} \
+            --label ${{ env.CONTAINER_NAME }} \
+            --image ${{ env.CONTAINER_NAME }}:latest
 
+      # Deploy to Lightsail container service
       - name: Deploy to Lightsail container service
         run: |
           IMAGE_TAG=$(aws lightsail get-container-images \
-            --service-name $LIGHTSAIL_SERVICE \
+            --region ${{ env.AWS_REGION }} \
+            --service-name ${{ env.LIGHTSAIL_SERVICE }} \
             --query 'containerImages[0].image' \
             --output text)
 
           aws lightsail create-container-service-deployment \
-            --service-name $LIGHTSAIL_SERVICE \
+            --region ${{ env.AWS_REGION }} \
+            --service-name ${{ env.LIGHTSAIL_SERVICE }} \
             --containers "{
-              \"$CONTAINER_NAME\": {
+              \"${{ env.CONTAINER_NAME }}\": {
                 \"image\": \"$IMAGE_TAG\",
                 \"ports\": {\"8080\": \"HTTP\"}
               }
             }" \
             --public-endpoint "{
-              \"containerName\": \"$CONTAINER_NAME\",
+              \"containerName\": \"${{ env.CONTAINER_NAME }}\",
               \"containerPort\": 8080,
               \"healthCheck\": {\"path\": \"/healthz\"}
             }"
-
