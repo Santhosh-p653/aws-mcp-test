@@ -1,0 +1,67 @@
+name: Deploy MCP Server to Lightsail
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  LIGHTSAIL_SERVICE: my-mcp-service   # Your Lightsail container service name
+  CONTAINER_NAME: mcp-server
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/GitHubActionsLightsailRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Podman & AWS Lightsail plugin
+        run: |
+          sudo apt-get install -y podman
+          curl "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
+            -o /usr/local/bin/lightsailctl
+          chmod +x /usr/local/bin/lightsailctl
+
+      - name: Build image with Podman
+        run: |
+          podman build -t $CONTAINER_NAME:latest .
+
+      - name: Push image to Lightsail container registry
+        run: |
+          aws lightsail push-container-image \
+            --region $AWS_REGION \
+            --service-name $LIGHTSAIL_SERVICE \
+            --label $CONTAINER_NAME \
+            --image $CONTAINER_NAME:latest
+
+      - name: Deploy to Lightsail container service
+        run: |
+          # Get the latest image tag pushed
+          IMAGE_TAG=$(aws lightsail get-container-images \
+            --service-name $LIGHTSAIL_SERVICE \
+            --query 'containerImages[0].image' \
+            --output text)
+
+          aws lightsail create-container-service-deployment \
+            --service-name $LIGHTSAIL_SERVICE \
+            --containers "{
+              \"$CONTAINER_NAME\": {
+                \"image\": \"$IMAGE_TAG\",
+                \"ports\": {\"8080\": \"HTTP\"}
+              }
+            }" \
+            --public-endpoint "{
+              \"containerName\": \"$CONTAINER_NAME\",
+          
