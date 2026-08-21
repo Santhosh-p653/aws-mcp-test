@@ -7,7 +7,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  LIGHTSAIL_SERVICE: my-mcp-service   # Your Lightsail container service name
+  LIGHTSAIL_SERVICE: my-mcp-service
   CONTAINER_NAME: mcp-server
 
 jobs:
@@ -32,10 +32,25 @@ jobs:
             -o /usr/local/bin/lightsailctl
           chmod +x /usr/local/bin/lightsailctl
 
+      # ✅ Build with Podman (the demo part)
       - name: Build image with Podman
         run: |
           podman build -t $CONTAINER_NAME:latest .
 
+      # ✅ Bridge: export from Podman → load into Docker for lightsailctl
+      - name: Export Podman image to Docker
+        run: |
+          podman save --format docker-archive $CONTAINER_NAME:latest \
+            -o /tmp/$CONTAINER_NAME.tar
+          sudo docker load -i /tmp/$CONTAINER_NAME.tar
+
+      - name: Install Lightsail CTL plugin
+        run: |
+          curl "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
+            -o /usr/local/bin/lightsailctl
+          chmod +x /usr/local/bin/lightsailctl
+
+      # ✅ Push via lightsailctl (uses Docker under the hood)
       - name: Push image to Lightsail container registry
         run: |
           aws lightsail push-container-image \
@@ -64,3 +79,4 @@ jobs:
               \"containerPort\": 8080,
               \"healthCheck\": {\"path\": \"/healthz\"}
             }"
+
