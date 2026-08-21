@@ -13,21 +13,19 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write   # Required for OIDC
-      contents: read
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::<YOUR_ACCOUNT_ID>:role/GitHubActionsLightsailRole
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install Podman & AWS Lightsail plugin
+      - name: Install Podman & Lightsail CTL plugin
         run: |
           sudo apt-get install -y podman
           curl "https://s3.us-west-2.amazonaws.com/lightsailctl/latest/linux-amd64/lightsailctl" \
@@ -48,7 +46,6 @@ jobs:
 
       - name: Deploy to Lightsail container service
         run: |
-          # Get the latest image tag pushed
           IMAGE_TAG=$(aws lightsail get-container-images \
             --service-name $LIGHTSAIL_SERVICE \
             --query 'containerImages[0].image' \
@@ -64,4 +61,6 @@ jobs:
             }" \
             --public-endpoint "{
               \"containerName\": \"$CONTAINER_NAME\",
-          
+              \"containerPort\": 8080,
+              \"healthCheck\": {\"path\": \"/healthz\"}
+            }"
