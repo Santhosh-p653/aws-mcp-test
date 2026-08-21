@@ -1,109 +1,149 @@
-import os
-import httpx
-import platform
-import psutil
 import datetime
 from fastmcp import FastMCP
 from starlette.responses import JSONResponse
+from scrapling.fetchers import Fetcher, StealthyFetcher
+from duckduckgo_search import DDGS
+from markdownify import markdownify as md
 
-# Initialize FastMCP Server
-mcp = FastMCP("my-custom-server")
+mcp = FastMCP("scrapling-knowledge-engine")
 
 # -------------------------------------------------------------
-# 1. AWS Lightsail Health Check Endpoint
+# Lightsail Health Check Route
 # -------------------------------------------------------------
 @mcp.custom_route("/healthz", methods=["GET"])
 async def health_check(request):
-    """Health check endpoint required by AWS Lightsail."""
     return JSONResponse({
         "status": "healthy",
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "service": "mcp-server"
+        "engine": "scrapling",
+        "service": "scrapling-knowledge-engine",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     })
 
 # -------------------------------------------------------------
-# 2. Production-Ready Tools
+# Tool 1: Real-Time Web Search
 # -------------------------------------------------------------
-
 @mcp.tool()
-async def fetch_web_page(url: str, max_chars: int = 4000) -> str:
-    """Fetch and return the text content of any public URL or API endpoint."""
-    headers = {"User-Agent": "FastMCP-Bot/1.0"}
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-        try:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            text = response.text
-            if len(text) > max_chars:
-                return text[:max_chars] + f"\n\n[... Truncated: showing first {max_chars} characters]"
-            return text
-        except Exception as e:
-            return f"Error fetching URL '{url}': {str(e)}"
-
-@mcp.tool()
-def get_system_metrics() -> dict:
-    """Get live compute metrics from the hosting container (CPU, Memory, Disk)."""
-    return {
-        "platform": platform.platform(),
-        "python_version": platform.python_version(),
-        "cpu_percent": psutil.cpu_percent(interval=0.1),
-        "memory": {
-            "total_mb": round(psutil.virtual_memory().total / (1024 * 1024), 2),
-            "available_mb": round(psutil.virtual_memory().available / (1024 * 1024), 2),
-            "used_percent": psutil.virtual_memory().percent
-        },
-        "disk": {
-            "total_gb": round(psutil.disk_usage('/').total / (1024 ** 3), 2),
-            "free_gb": round(psutil.disk_usage('/').free / (1024 ** 3), 2),
-            "used_percent": psutil.disk_usage('/').percent
-        }
-    }
-
-@mcp.tool()
-def evaluate_math_expression(expression: str) -> str:
-    """Safely calculate a mathematical expression without raw arbitrary execution."""
-    allowed_chars = set("0123456789+-*/().,% eE")
-    if not all(c in allowed_chars for c in expression):
-        return "Error: Expression contains unsupported or unsafe characters."
+def search_web(query: str, max_results: int = 5) -> list[dict]:
+    """
+    Search the live web anonymously for current events, technical docs, or real-time data.
+    Returns a list of results with title, snippet, and target URL.
+    """
+    results = []
     try:
-        # Safe math evaluation namespace
-        result = eval(expression, {"__builtins__": None}, {})
-        return str(result)
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append({
+                    "title": r.get("title"),
+                    "url": r.get("href"),
+                    "snippet": r.get("body")
+                })
+        return results
     except Exception as e:
-        return f"Calculation error: {str(e)}"
+        return [{"error": f"Search failed: {str(e)}"}]
 
+# -------------------------------------------------------------
+# Tool 2: High-Speed Web Content Extractor (Scrapling HTTP)
+# -------------------------------------------------------------
 @mcp.tool()
-def analyze_text_statistics(text: str) -> dict:
-    """Compute word count, character count, estimated reading time, and lexical density."""
-    words = text.split()
-    word_count = len(words)
-    char_count = len(text)
-    char_count_no_spaces = len(text.replace(" ", ""))
-    unique_words = len(set(word.lower() for word in words))
-    
-    # 200 WPM average reading speed
-    reading_time_seconds = round((word_count / 200) * 60, 1) if word_count > 0 else 0
+def fetch_page_knowledge(url: str, max_length: int = 6000) -> dict:
+    """
+    Ultra-fast web content and knowledge extractor using Scrapling's high-speed HTTP engine.
+    Extracts page title, metadata, main text, and clean LLM-ready markdown.
+    """
+    try:
+        # Initialize Scrapling Fast Fetcher
+        fetcher = Fetcher(auto_match=False)
+        page = fetcher.get(url, stealthy_headers=True)
 
-    return {
-        "word_count": word_count,
-        "unique_words": unique_words,
-        "lexical_diversity": round(unique_words / word_count, 3) if word_count > 0 else 0,
-        "char_count_with_spaces": char_count,
-        "char_count_no_spaces": char_count_no_spaces,
-        "est_reading_time_seconds": reading_time_seconds
-    }
+        if not page or page.status >= 400:
+            return {"error": f"Failed to fetch page. HTTP Status: {page.status if page else 'Unknown'}"}
+
+        # Extract title and headings
+        title = page.css("title::text").get() or "No title"
+        
+        # Scrapling isolates main article/body content cleanly
+        main_content = (
+            page.css("article").get() or 
+            page.css("main").get() or 
+            page.css("#content").get() or 
+            page.css("body").get() or ""
+        )
+
+        # Convert clean HTML to LLM Markdown
+        clean_markdown = md(main_content, heading_style="ATX", strip=['script', 'style', 'nav', 'footer', 'aside'])
+        
+        # Format and truncate for token-budget optimization
+        lines = [line.strip() for line in clean_markdown.splitlines() if line.strip()]
+        formatted_output = "\n\n".join(lines)
+
+        if len(formatted_output) > max_length:
+            formatted_output = formatted_output[:max_length] + f"\n\n[... Truncated to fit token budget (max: {max_length} chars)]"
+
+        return {
+            "title": title,
+            "url": url,
+            "char_count": len(formatted_output),
+            "content": formatted_output or "No text could be extracted."
+        }
+    except Exception as e:
+        return {"error": f"Scrapling extraction error: {str(e)}"}
 
 # -------------------------------------------------------------
-# 3. Dynamic Resources
+# Tool 3: Stealth Extractor for Bot-Protected / Cloudflare Sites
 # -------------------------------------------------------------
+@mcp.tool()
+def fetch_stealth_knowledge(url: str, max_length: int = 6000) -> dict:
+    """
+    Bypasses aggressive anti-bot protections (Cloudflare, Akamai, PerimeterX)
+    using Scrapling's StealthyFetcher engine with real browser fingerprinting.
+    """
+    try:
+        page = StealthyFetcher.fetch(url, headless=True, network_idle=True)
+        
+        title = page.css("title::text").get() or "No title"
+        main_content = page.css("article").get() or page.css("main").get() or page.css("body").get() or ""
+        
+        clean_markdown = md(main_content, heading_style="ATX", strip=['script', 'style', 'nav', 'footer', 'aside'])
+        lines = [line.strip() for line in clean_markdown.splitlines() if line.strip()]
+        formatted_output = "\n\n".join(lines)
 
-@mcp.resource("system://env")
-def get_environment_info() -> str:
-    """Return non-sensitive runtime container environment properties."""
-    return f"Container Host: {platform.node()} | Architecture: {platform.machine()}"
+        if len(formatted_output) > max_length:
+            formatted_output = formatted_output[:max_length] + "\n\n[... Truncated]"
+
+        return {
+            "title": title,
+            "url": url,
+            "mode": "stealth",
+            "content": formatted_output or "No text could be extracted."
+        }
+    except Exception as e:
+        return {"error": f"Stealth extraction error: {str(e)}"}
 
 # -------------------------------------------------------------
-# 4. Entrypoint
+# Tool 4: Parallel Batch Knowledge Research
 # -------------------------------------------------------------
+@mcp.tool()
+def batch_knowledge_extract(urls: list[str]) -> list[dict]:
+    """
+    Extracts structured content from multiple URLs in a single call for comparative RAG and synthesis.
+    """
+    results = []
+    fetcher = Fetcher(auto_match=False)
+    for target in urls[:5]:
+        try:
+            page = fetcher.get(target, stealthy_headers=True)
+            title = page.css("title::text").get() or "No title"
+            content = page.css("article").get() or page.css("main").get() or page.css("body").get() or ""
+            clean_md = md(content, heading_style="ATX", strip=['script', 'style', 'nav', 'footer'])
+            
+            results.append({
+                "url": target,
+                "title": title,
+                "summary_content": clean_md[:2000]
+            })
+        except Exception as e:
+            results.append({"url": target, "error": str(e)})
+    return results
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8080)
