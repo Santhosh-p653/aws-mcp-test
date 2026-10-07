@@ -7,6 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker)](https://www.docker.com/)
 [![Scrapling](https://img.shields.io/badge/Scrapling-Web%20Extraction-green)](https://scrapling.readthedocs.io/)
+[![M8ven Score](https://m8ven.ai/badge/mcp/santhosh-p653-aws-mcp-test-1c4592)](https://m8ven.ai/mcp/santhosh-p653-aws-mcp-test-1c4592?s=readme)
 
 ## Overview
 
